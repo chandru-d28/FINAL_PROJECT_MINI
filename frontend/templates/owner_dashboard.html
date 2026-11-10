@@ -677,13 +677,6 @@
             }
         }
         
-        // Auto-calculate daily price based on hourly price
-        document.getElementById('price_per_hour').addEventListener('input', function() {
-            const hourlyPrice = parseFloat(this.value) || 0;
-            const dailyPrice = hourlyPrice * 8; // 8 hours per day
-            document.getElementById('price_per_day').value = dailyPrice;
-        });
-
         async function loadOwnerRatings() {
             try {
                 const [transRes, ratingsRes] = await Promise.all([

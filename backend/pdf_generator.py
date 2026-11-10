@@ -63,7 +63,13 @@ def generate_receipt_pdf(booking_data, lang='en', translations_dict=None):
         (t('phone', lang), booking_data.get('farmer_phone', 'N/A')),
         (t('address', lang), booking_data.get('farmer_location', 'N/A')),
         (t('equipment_name', lang), booking_data.get('equipment_name', 'N/A')),
-        (t('duration', lang), f"{booking_data.get('duration_hours', 0)} {t('hours', lang)}"),
+        ('From', booking_data.get('start_datetime', 'N/A').replace('T', ' ') if booking_data.get('start_datetime') else 'N/A'),
+        ('To', booking_data.get('end_datetime', 'N/A').replace('T', ' ') if booking_data.get('end_datetime') else 'N/A'),
+        (
+            t('duration', lang),
+            f"{booking_data.get('duration_hours', 0) // 24 if booking_data.get('rental_unit') == 'day' else booking_data.get('duration_hours', 0)} "
+            f"{'days' if booking_data.get('rental_unit') == 'day' else t('hours', lang)}"
+        ),
         (t('amount', lang), f"₹{booking_data.get('total_amount', 0)}"),
         (t('date_time', lang), booking_data.get('payment_date', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))),
         (t('payment_status', lang), t('success', lang))

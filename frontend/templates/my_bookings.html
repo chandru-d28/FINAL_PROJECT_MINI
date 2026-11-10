@@ -93,13 +93,27 @@
                         <div class="detail-label" data-translate="date">Date</div>
                         <div class="detail-value">{{ booking.booking_date }}</div>
                     </div>
+                    {% if booking.start_datetime %}
+                    <div class="detail-item">
+                        <div class="detail-label">From</div>
+                        <div class="detail-value">{{ booking.start_datetime.replace('T', ' ') }}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">To</div>
+                        <div class="detail-value">{{ booking.end_datetime.replace('T', ' ') }}</div>
+                    </div>
+                    {% endif %}
                     <div class="detail-item">
                         <div class="detail-label" data-translate="duration">Duration</div>
-                        <div class="detail-value">{{ booking.rental_duration }} <span data-translate="hours_short">h</span></div>
+                        <div class="detail-value">{{ booking.rental_duration }} {{ 'days' if booking.rental_unit == 'day' else 'h' }}</div>
                     </div>
                     <div class="detail-item">
                         <div class="detail-label" data-translate="price_per_hour">Rate</div>
-                        <div class="detail-value">₹{{ booking.hourly_rate }}/<span data-translate="hours_short">h</span></div>
+                        <div class="detail-value">
+                            {% if booking.rental_unit == 'day' %}₹{{ booking.daily_rate }}/day
+                            {% elif booking.rental_unit == 'mixed' %}Daily and hourly rates
+                            {% else %}₹{{ booking.hourly_rate }}/h{% endif %}
+                        </div>
                     </div>
                     <div class="detail-item">
                         <div class="detail-label" data-translate="status">Payment</div>
@@ -241,8 +255,10 @@
                                 [t('booking_id','Booking ID'), b.booking_id],
                                 [t('equipment','Equipment'), b.equipment_name],
                                 [t('date','Date'), b.booking_date],
-                                [t('duration','Duration'), b.rental_duration + ' ' + t('hours_short','h')],
-                                [t('price_per_hour','Rate'), '₹' + b.hourly_rate + '/h'],
+                                [t('duration','Duration'), b.rental_duration + (b.rental_unit === 'day' ? ' days' : ' ' + t('hours_short','h'))],
+                                ['From', b.start_datetime ? b.start_datetime.replace('T', ' ') : '—'],
+                                ['To', b.end_datetime ? b.end_datetime.replace('T', ' ') : '—'],
+                                [t('price_per_hour','Rate'), b.rental_unit === 'mixed' ? 'Daily and hourly rates' : '₹' + (b.rental_unit === 'day' ? b.daily_rate : b.hourly_rate) + (b.rental_unit === 'day' ? '/day' : '/h')],
                                 [t('amount','Total'), '₹' + b.total_amount],
                                 [t('status','Payment'), b.payment_method || 'COD'],
                                 [t('status','Pay Status'), b.payment_status === 'PENDING' ? t('pending','Pay on Delivery') : b.payment_status],

@@ -76,16 +76,24 @@
                         <div class="detail-value">{{ booking.booking_date }}</div>
                     </div>
                     <div class="detail-item">
-                        <div class="detail-label">Start Time</div>
-                        <div class="detail-value">{{ booking.booking_time }}</div>
+                        <div class="detail-label">From</div>
+                        <div class="detail-value">{{ booking.start_datetime.replace('T', ' ') if booking.start_datetime else booking.booking_time }}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">To</div>
+                        <div class="detail-value">{{ booking.end_datetime.replace('T', ' ') if booking.end_datetime else '—' }}</div>
                     </div>
                     <div class="detail-item">
                         <div class="detail-label">Duration</div>
-                        <div class="detail-value">{{ booking.rental_duration }} hours</div>
+                        <div class="detail-value">{{ booking.rental_duration }} {{ 'days' if booking.rental_unit == 'day' else 'hours' }}</div>
                     </div>
                     <div class="detail-item">
-                        <div class="detail-label">Hourly Rate</div>
-                        <div class="detail-value">₹{{ booking.hourly_rate }}/hour</div>
+                        <div class="detail-label">Rate</div>
+                        <div class="detail-value">
+                            {% if booking.rental_unit == 'day' %}₹{{ booking.daily_rate }}/day
+                            {% elif booking.rental_unit == 'mixed' %}Daily and hourly rates
+                            {% else %}₹{{ booking.hourly_rate }}/hour{% endif %}
+                        </div>
                     </div>
                     <div class="detail-item">
                         <div class="detail-label">Total Amount</div>

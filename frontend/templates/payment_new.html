@@ -30,7 +30,9 @@
                                 <div class="col-md-6">
                                     <p><strong><span data-translate="equipment">Equipment</span>:</strong> {{ booking.equipment_name }}</p>
                                     <p><strong><span data-translate="booking_id">Booking ID</span>:</strong> {{ booking.booking_id }}</p>
-                                    <p><strong><span data-translate="duration">Duration</span>:</strong> {{ booking.duration_hours }} <span data-translate="hours">hours</span></p>
+                                    <p><strong><span data-translate="duration">Duration</span>:</strong> {{ booking.duration_hours // 24 if booking.rental_unit == 'day' else booking.duration_hours }} <span>{{ 'days' if booking.rental_unit == 'day' else 'hours' }}</span></p>
+                                    {% if booking.start_datetime %}<p><strong>From:</strong> {{ booking.start_datetime.replace('T', ' ') }}</p>{% endif %}
+                                    {% if booking.end_datetime %}<p><strong>To:</strong> {{ booking.end_datetime.replace('T', ' ') }}</p>{% endif %}
                                 </div>
                                 <div class="col-md-6">
                                     <p><strong><span data-translate="date">Date</span>:</strong> {{ booking.booking_date }}</p>

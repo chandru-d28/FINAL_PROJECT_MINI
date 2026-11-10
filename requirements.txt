@@ -4,3 +4,4 @@ pandas
 reportlab
 scikit-learn
 waitress
+gunicorn

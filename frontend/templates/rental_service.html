@@ -344,13 +344,13 @@
                                     <i class="fas fa-clock me-1"></i>₹{{ eq.price_per_hour }}/hour
                                 </span>
                                 <span class="badge bg-primary price-badge">
-                                    <i class="fas fa-calendar-day me-1"></i>₹{{ eq.price_per_day }}/day
+                                    <i class="fas fa-calendar-day me-1"></i>₹{{ eq.price_per_day }}/day (24 hours)
                                 </span>
                             </div>
                         </div>
                         
                         <div class="mt-auto">
-                            <button class="btn btn-success btn-book" onclick="bookEquipment({{ eq.id }}, '{{ eq.display_name }}', {{ eq.price_per_hour }})">
+                            <button class="btn btn-success btn-book" onclick="bookEquipment({{ eq.id }}, '{{ eq.display_name }}', {{ eq.price_per_hour }}, {{ eq.price_per_day }})">
                                 <i class="fas fa-calendar-plus me-2"></i><span data-translate="book_now">Book Now</span>
                             </button>
                         </div>
@@ -387,12 +387,13 @@
                             <input type="text" class="form-control" id="equipment_name" readonly>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label" data-translate="booking_date">Booking Date</label>
-                            <input type="date" class="form-control" id="booking_date" required>
+                            <label class="form-label" for="start_datetime">From (date and time)</label>
+                            <input type="datetime-local" class="form-control" id="start_datetime" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label" data-translate="duration_hours">Duration (hours)</label>
-                            <input type="number" class="form-control" id="duration_hours" min="1" required>
+                            <label class="form-label" for="end_datetime">To (date and time)</label>
+                            <input type="datetime-local" class="form-control" id="end_datetime" required>
+                            <small class="form-text text-muted">A full 24 hours uses the listed daily rate. Shorter periods use the hourly rate.</small>
                         </div>
                         <div class="mb-3">
                             <label class="form-label" data-translate="delivery_address">Delivery Address</label>
@@ -487,22 +488,48 @@
         document.getElementById('typeFilter').addEventListener('change', applyFilters);
         document.getElementById('priceFilter').addEventListener('change', applyFilters);
         
-        function bookEquipment(equipmentId, equipmentName, pricePerHour) {
+        function bookEquipment(equipmentId, equipmentName, pricePerHour, pricePerDay) {
             document.getElementById('equipment_id').value = equipmentId;
             document.getElementById('equipment_name').value = equipmentName;
-            
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('booking_date').min = today;
-            
-            // Update total amount calculation
-            const durationInput = document.getElementById('duration_hours');
+
+            const startInput = document.getElementById('start_datetime');
+            const endInput = document.getElementById('end_datetime');
             const totalAmountInput = document.getElementById('total_amount');
-            
-            durationInput.oninput = function() {
-                const hours = parseFloat(this.value) || 0;
-                const total = hours * pricePerHour;
-                totalAmountInput.value = '₹' + total.toFixed(2);
-            };
+
+            function toLocalDateTimeValue(date) {
+                const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+                return localDate.toISOString().slice(0, 16);
+            }
+
+            startInput.min = toLocalDateTimeValue(new Date());
+            startInput.value = '';
+            endInput.value = '';
+            endInput.min = startInput.min;
+            totalAmountInput.value = '';
+
+            function updateCost() {
+                endInput.min = startInput.value || startInput.min;
+                if (!startInput.value || !endInput.value) {
+                    totalAmountInput.value = 'Select start and end times';
+                    return;
+                }
+                const durationMinutes = (new Date(endInput.value) - new Date(startInput.value)) / 60000;
+                if (durationMinutes <= 0) {
+                    totalAmountInput.value = 'End time must be after the start time';
+                    return;
+                }
+                const fullDays = Math.floor(durationMinutes / 1440);
+                const remainingHours = Math.ceil((durationMinutes % 1440) / 60);
+                const total = fullDays * pricePerDay + remainingHours * pricePerHour;
+                const durationSummary = [
+                    fullDays ? `${fullDays} day(s)` : '',
+                    remainingHours ? `${remainingHours} hour(s)` : ''
+                ].filter(Boolean).join(' + ');
+                totalAmountInput.value = `₹${total.toFixed(2)} (${durationSummary})`;
+            }
+
+            startInput.onchange = updateCost;
+            endInput.onchange = updateCost;
             
             new bootstrap.Modal(document.getElementById('bookingModal')).show();
         }
@@ -510,13 +537,18 @@
         async function confirmBooking() {
             const bookingData = {
                 equipment_id: document.getElementById('equipment_id').value,
-                booking_date: document.getElementById('booking_date').value,
-                duration_hours: document.getElementById('duration_hours').value,
+                start_datetime: document.getElementById('start_datetime').value,
+                end_datetime: document.getElementById('end_datetime').value,
+                timezone_offset: new Date(document.getElementById('start_datetime').value).getTimezoneOffset(),
                 delivery_address: document.getElementById('delivery_address').value
             };
             
-            if (!bookingData.booking_date || !bookingData.duration_hours || !bookingData.delivery_address) {
-                alert('Please fill in all required fields.');
+            if (!bookingData.start_datetime || !bookingData.end_datetime || !bookingData.delivery_address) {
+                alert('Please select the start and end date/time and enter a delivery address.');
+                return;
+            }
+            if (new Date(bookingData.end_datetime) <= new Date(bookingData.start_datetime)) {
+                alert('End date and time must be after the start date and time.');
                 return;
             }
             

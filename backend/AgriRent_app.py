@@ -12,6 +12,7 @@ import os
 import json
 import sys
 import io
+from datetime import datetime, timedelta, timezone
 from .paths import DATABASE_PATH, FRONTEND_DIR, STATIC_DIR, TRANSLATIONS_DIR
 from .config import DEBUG, SECRET_KEY
 
@@ -779,6 +780,18 @@ def ensure_payment_tables():
         if 'payment_id' not in columns:
             cursor.execute('ALTER TABLE bookings ADD COLUMN payment_id INTEGER')
             print("Added payment_id column to bookings")
+
+        if 'rental_unit' not in columns:
+            cursor.execute("ALTER TABLE bookings ADD COLUMN rental_unit TEXT NOT NULL DEFAULT 'hour'")
+            print("Added rental_unit column to bookings")
+
+        if 'start_datetime' not in columns:
+            cursor.execute('ALTER TABLE bookings ADD COLUMN start_datetime TEXT')
+            print("Added start_datetime column to bookings")
+
+        if 'end_datetime' not in columns:
+            cursor.execute('ALTER TABLE bookings ADD COLUMN end_datetime TEXT')
+            print("Added end_datetime column to bookings")
         
         conn.commit()
         print("Payment tables verified/created successfully")
@@ -866,6 +879,9 @@ def init_database():
                 farmer_id INTEGER NOT NULL,
                 booking_date TEXT NOT NULL,
                 duration_hours INTEGER NOT NULL,
+                rental_unit TEXT NOT NULL DEFAULT 'hour',
+                start_datetime TEXT,
+                end_datetime TEXT,
                 delivery_address TEXT,
                 total_amount REAL NOT NULL,
                 status TEXT DEFAULT 'CONFIRMED',
@@ -928,6 +944,7 @@ def init_database():
     finally:
         if conn:
             conn.close()
+
 
 def get_db_connection():
     conn = sqlite3.connect(DATABASE_PATH, timeout=30.0)
@@ -1256,6 +1273,48 @@ def get_ai_recommendations():
             'data': []
         }), 500
 
+RECOMMENDATION_KEYWORDS = {
+    'land_preparation': (
+        'tractor', 'cultivator', 'bulldozer', 'land preparation',
+        'land leveler', 'rotavator', 'tiller', 'plough', 'plow',
+        'post hole digger',
+    ),
+    'sowing': (
+        'seed', 'seeder', 'sowing', 'planting', 'transplanter',
+        'nursery tray',
+    ),
+    'irrigation': (
+        'irrigation', 'pump', 'fertigation',
+    ),
+    'maintenance': (
+        'sprayer', 'spraying', 'crop protection', 'fertilizer',
+        'fertiliser', 'weeder', 'weed', 'mulcher', 'bird scarer',
+    ),
+    'harvesting': (
+        'harvest', 'thresh', 'coconut tree climbing', 'climbing machine',
+    ),
+    'post_harvest': (
+        'thresh', 'dryer', 'grain processing', 'processing', 'packaging',
+        'expeller', 'telehandler', 'hay bale loader', 'material handling',
+        'bag stitching',
+    ),
+}
+
+
+def _equipment_matches_stage(equipment, farming_stage):
+    keywords = RECOMMENDATION_KEYWORDS.get(farming_stage, ())
+    name = str(equipment.get('name') or '').strip().lower()
+    equipment_type = str(equipment.get('type') or '').strip().lower()
+
+    for keyword in keywords:
+        if keyword == 'tractor':
+            if equipment_type == 'tractor' or name.endswith(' tractor'):
+                return True
+        elif keyword in name or keyword in equipment_type:
+            return True
+    return False
+
+
 def generate_equipment_recommendations(farming_stage, crop_category, farm_size, season, budget_range, urgency):
     """Generate intelligent equipment recommendations"""
     print(f"[AI_ENGINE] Generating recommendations for {crop_category} {farming_stage}")
@@ -1263,21 +1322,29 @@ def generate_equipment_recommendations(farming_stage, crop_category, farm_size, 
     try:
         conn = get_db_connection()
         
-        # Equipment mapping based on farming stage and crop
-        stage_equipment_map = {
-            'land_preparation': ['Tractor', 'Cultivator', 'Bulldozer'],
-            'sowing': ['Seeder', 'Seed Drill Machine', 'Tractor'],
-            'irrigation': ['Sprayer', 'Irrigation'],
-            'maintenance': ['Sprayer', 'Cultivator', 'Weeder'],
-            'harvesting': ['Harvester', 'Combine Harvester', 'Thresher'],
-            'post_harvest': ['Thresher', 'Dryer']
-        }
-        
-        # Get relevant equipment types
-        equipment_types = stage_equipment_map.get(farming_stage, ['Tractor'])
-        print(f"[AI_ENGINE] Looking for equipment types: {equipment_types}")
-        
-        type_conditions = ', '.join(['?'] * len(equipment_types))
+        keywords = RECOMMENDATION_KEYWORDS.get(farming_stage, ())
+        if not keywords:
+            raise ValueError(f'Unsupported farming stage: {farming_stage}')
+
+        keyword_conditions = []
+        params = []
+        for keyword in keywords:
+            if keyword == 'tractor':
+                keyword_conditions.append(
+                    "(LOWER(TRIM(e.type)) = ? OR LOWER(TRIM(e.name)) LIKE ?)"
+                )
+                params.extend(['tractor', '% tractor'])
+            else:
+                keyword_conditions.append(
+                    """(
+                        LOWER(REPLACE(REPLACE(COALESCE(e.name, ''), '  ', ' '), '  ', ' ')) LIKE ?
+                        OR LOWER(REPLACE(REPLACE(COALESCE(e.type, ''), '  ', ' '), '  ', ' ')) LIKE ?
+                    )"""
+                )
+                pattern = f'%{keyword}%'
+                params.extend([pattern, pattern])
+        print(f"[AI_ENGINE] Looking for keywords: {keywords}")
+
         query = f'''
             SELECT e.*, u.name as owner_name, et.translated_name
             FROM equipment e
@@ -1286,16 +1353,12 @@ def generate_equipment_recommendations(farming_stage, crop_category, farm_size, 
                 ON e.id = et.equipment_id AND et.language_code = 'en'
             WHERE e.available = 1
               AND u.user_type = 'owner'
-              AND e.type IN ({type_conditions})
+              AND ({' OR '.join(keyword_conditions)})
                         GROUP BY e.name, e.type, e.price_per_hour, e.price_per_day,
-                                         e.location, e.owner_id
+                                         e.location
             ORDER BY e.price_per_day ASC
-            LIMIT 10
         '''
-        
-        # Prepare parameters for query
-        params = equipment_types
-        
+
         print(f"[AI_ENGINE] Query: {query}")
         print(f"[AI_ENGINE] Params: {params}")
         
@@ -1354,6 +1417,20 @@ def generate_equipment_recommendations(farming_stage, crop_category, farm_size, 
         
         # Sort by match score
         recommendations.sort(key=lambda x: x['match_score'], reverse=True)
+
+        # Avoid letting a large inventory in one city fill every recommendation.
+        by_location = {}
+        for recommendation in recommendations:
+            location_key = str(recommendation.get('location') or '').strip().casefold()
+            by_location.setdefault(location_key, []).append(recommendation)
+
+        recommendations = []
+        while len(recommendations) < 10 and any(by_location.values()):
+            for location_recommendations in by_location.values():
+                if location_recommendations:
+                    recommendations.append(location_recommendations.pop(0))
+                    if len(recommendations) == 10:
+                        break
         
         print(f"[AI_ENGINE] Returning {len(recommendations)} recommendations")
         return recommendations
@@ -1369,12 +1446,8 @@ def calculate_match_score(equipment, farming_stage, crop_category, farm_size, bu
     # Convert Row to dict for safe access
     eq_dict = dict(equipment)
     
-    # Stage-specific scoring
-    if farming_stage == 'land_preparation' and 'Tractor' in eq_dict['name']:
-        score += 20
-    elif farming_stage == 'harvesting' and 'Harvester' in eq_dict['name']:
-        score += 25
-    elif farming_stage == 'sowing' and 'Seed' in eq_dict['name']:
+    # Give a stage-match bonus when the equipment name or category matches its keywords.
+    if _equipment_matches_stage(eq_dict, farming_stage):
         score += 20
     
     # Farm size scoring
@@ -1429,10 +1502,50 @@ def book_equipment():
         return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.get_json()
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Invalid booking details'}), 400
+
     equipment_id = data.get('equipment_id')
-    booking_date = data.get('booking_date')
-    duration_hours = int(data.get('duration_hours', 8))
+    start_datetime_value = data.get('start_datetime')
+    end_datetime_value = data.get('end_datetime')
+    timezone_offset = data.get('timezone_offset')
+    if timezone_offset is None:
+        local_offset = datetime.now().astimezone().utcoffset()
+        timezone_offset = -int(local_offset.total_seconds() // 60) if local_offset else 0
+    if (isinstance(timezone_offset, bool) or not isinstance(timezone_offset, int)
+            or not -840 <= timezone_offset <= 840):
+        return jsonify({'error': 'Unable to determine your local timezone'}), 400
+
+    try:
+        start_datetime = datetime.strptime(start_datetime_value, '%Y-%m-%dT%H:%M')
+        end_datetime = datetime.strptime(end_datetime_value, '%Y-%m-%dT%H:%M')
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Choose a valid start and end date and time'}), 400
+
     delivery_address = data.get('delivery_address', '')
+    if end_datetime <= start_datetime:
+        return jsonify({'error': 'End date and time must be after the start date and time'}), 400
+    start_datetime_utc = start_datetime.replace(
+        tzinfo=timezone(timedelta(minutes=-timezone_offset))
+    ).astimezone(timezone.utc)
+    if start_datetime_utc < datetime.now(timezone.utc):
+        return jsonify({'error': 'Start date and time cannot be in the past'}), 400
+    if not isinstance(delivery_address, str) or not delivery_address.strip():
+        return jsonify({'error': 'Delivery address is required'}), 400
+
+    duration_minutes = int((end_datetime - start_datetime).total_seconds() // 60)
+    if duration_minutes < 1:
+        return jsonify({'error': 'Booking must be at least one minute long'}), 400
+
+    duration_hours = (duration_minutes + 59) // 60
+    full_days, remaining_minutes = divmod(duration_minutes, 24 * 60)
+    remaining_hours = (remaining_minutes + 59) // 60
+    if full_days and remaining_hours:
+        rental_unit = 'mixed'
+    elif full_days:
+        rental_unit = 'day'
+    else:
+        rental_unit = 'hour'
     
     conn = get_db_connection()
     
@@ -1445,15 +1558,19 @@ def book_equipment():
         conn.close()
         return jsonify({'error': 'Equipment not found'}), 404
     
-    # Calculate total amount
-    total_amount = equipment['price_per_hour'] * duration_hours
+    total_amount = equipment['price_per_day'] * full_days + equipment['price_per_hour'] * remaining_hours
     booking_id = str(uuid.uuid4())[:8].upper()
+    start_datetime_text = start_datetime.isoformat(timespec='minutes')
+    end_datetime_text = end_datetime.isoformat(timespec='minutes')
     
-    # Create booking with delivery address
     conn.execute('''
-        INSERT INTO bookings (booking_id, equipment_id, farmer_id, booking_date, duration_hours, delivery_address, total_amount)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (booking_id, equipment_id, session['user_id'], booking_date, duration_hours, delivery_address, total_amount))
+        INSERT INTO bookings (booking_id, equipment_id, farmer_id, booking_date, duration_hours, rental_unit, start_datetime, end_datetime, delivery_address, total_amount)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        booking_id, equipment_id, session['user_id'], start_datetime.date().isoformat(),
+        duration_hours, rental_unit, start_datetime_text, end_datetime_text,
+        delivery_address, total_amount
+    ))
     
     conn.commit()
     conn.close()
@@ -2497,7 +2614,8 @@ def get_booking_detail(booking_id):
         return jsonify({'error': 'Unauthorized'}), 401
     conn = get_db_connection()
     b = conn.execute('''
-        SELECT b.*, e.name as equipment_name, e.price_per_hour as hourly_rate,
+        SELECT b.*, e.name as equipment_name,
+               e.price_per_hour as hourly_rate, e.price_per_day as daily_rate,
                p.payment_method, p.payment_status as pay_status
         FROM bookings b
         JOIN equipment e ON b.equipment_id = e.id
@@ -2513,9 +2631,13 @@ def get_booking_detail(booking_id):
         'equipment_name': d['equipment_name'],
         'farmer':         session.get('user_name', ''),
         'booking_date':   d['booking_date'],
-        'booking_time':   '08:00 AM',
-        'rental_duration':d.get('duration_hours', 0),
+        'booking_time':   d.get('start_datetime') or '08:00 AM',
+        'start_datetime':d.get('start_datetime'),
+        'end_datetime':  d.get('end_datetime'),
+        'rental_duration':d.get('duration_hours', 0) // 24 if d.get('rental_unit') == 'day' else d.get('duration_hours', 0),
+        'rental_unit':    d.get('rental_unit', 'hour'),
         'hourly_rate':    d.get('hourly_rate', 0),
+        'daily_rate':     d.get('daily_rate', 0),
         'total_amount':   d.get('total_amount', 0),
         'payment_method': d.get('payment_method') or 'COD',
         'payment_status': d.get('pay_status') or d.get('payment_status') or 'PENDING',
@@ -2529,7 +2651,8 @@ def my_bookings():
         return redirect(url_for('index'))
     conn = get_db_connection()
     bookings_raw = conn.execute('''
-        SELECT b.*, e.name as equipment_name, e.price_per_hour as hourly_rate,
+        SELECT b.*, e.name as equipment_name,
+               e.price_per_hour as hourly_rate, e.price_per_day as daily_rate,
                p.payment_method, p.payment_status as pay_status
         FROM bookings b
         JOIN equipment e ON b.equipment_id = e.id
@@ -2547,7 +2670,8 @@ def my_bookings():
         d = dict(b)
         d['display_status'] = d.get('status', 'CONFIRMED').title()
         d['booking_time']   = '08:00 AM'
-        d['rental_duration']= d.get('duration_hours', 0)
+        d['rental_duration'] = d.get('duration_hours', 0) // 24 if d.get('rental_unit') == 'day' else d.get('duration_hours', 0)
+        d['rental_unit'] = d.get('rental_unit', 'hour')
         d['payment_method'] = d.get('payment_method') or 'COD'
         d['payment_status'] = d.get('pay_status') or d.get('payment_status') or 'PENDING'
         d['already_reviewed'] = d['booking_id'] in reviewed

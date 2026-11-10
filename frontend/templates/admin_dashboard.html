@@ -199,7 +199,7 @@
                                 <td>{{ booking.equipment_id }}</td>
                                 <td>{{ booking.farmer_id }}</td>
                                 <td>{{ booking.booking_date }}</td>
-                                <td>{{ booking.duration_hours }}h</td>
+                                <td>{{ booking.duration_hours // 24 if booking.rental_unit == 'day' else booking.duration_hours }}{{ ' days' if booking.rental_unit == 'day' else 'h' }}</td>
                                 <td>₹{{ booking.total_amount }}</td>
                                 <td><span class="badge bg-success">{{ booking.status }}</span></td>
                             </tr>

@@ -49,9 +49,19 @@
                 <span class="receipt-label">{{ text.get('booking_date', 'Booking Date') }}:</span>
                 <span class="receipt-value">{{ booking.booking_date }}</span>
             </div>
+            {% if booking.start_datetime %}
+            <div class="receipt-row">
+                <span class="receipt-label">From:</span>
+                <span class="receipt-value">{{ booking.start_datetime.replace('T', ' ') }}</span>
+            </div>
+            <div class="receipt-row">
+                <span class="receipt-label">To:</span>
+                <span class="receipt-value">{{ booking.end_datetime.replace('T', ' ') }}</span>
+            </div>
+            {% endif %}
             <div class="receipt-row">
                 <span class="receipt-label">{{ text.get('duration', 'Duration') }}:</span>
-                <span class="receipt-value">{{ booking.duration_hours }} {{ text.get('hours', 'hours') }}</span>
+                <span class="receipt-value">{{ booking.duration_hours // 24 if booking.rental_unit == 'day' else booking.duration_hours }} {{ 'days' if booking.rental_unit == 'day' else text.get('hours', 'hours') }}</span>
             </div>
             <div class="receipt-row">
                 <span class="receipt-label">{{ text.get('payment_method', 'Payment Method') }}:</span>

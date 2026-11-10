@@ -30,7 +30,9 @@
                                 <div class="col-md-6">
                                     <p><strong>{{ text.get('equipment', 'Equipment') }}:</strong> {{ booking.equipment_name }}</p>
                                     <p><strong>{{ text.get('booking_id', 'Booking ID') }}:</strong> {{ booking.booking_id }}</p>
-                                    <p><strong>{{ text.get('duration', 'Duration') }}:</strong> {{ booking.duration_hours }} hours</p>
+                                    <p><strong>{{ text.get('duration', 'Duration') }}:</strong> {{ booking.duration_hours // 24 if booking.rental_unit == 'day' else booking.duration_hours }} {{ 'days' if booking.rental_unit == 'day' else 'hours' }}</p>
+                                    {% if booking.start_datetime %}<p><strong>From:</strong> {{ booking.start_datetime.replace('T', ' ') }}</p>{% endif %}
+                                    {% if booking.end_datetime %}<p><strong>To:</strong> {{ booking.end_datetime.replace('T', ' ') }}</p>{% endif %}
                                 </div>
                                 <div class="col-md-6">
                                     <p><strong>{{ text.get('date', 'Date') }}:</strong> {{ booking.booking_date }}</p>
