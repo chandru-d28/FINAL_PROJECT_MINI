@@ -387,13 +387,31 @@
                             <input type="text" class="form-control" id="equipment_name" readonly>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label" for="start_datetime">From (date and time)</label>
-                            <input type="datetime-local" class="form-control" id="start_datetime" required>
+                            <label class="form-label d-block">Choose rental period</label>
+                            <div class="d-flex gap-2" role="group" aria-label="Rental period">
+                                <button type="button" class="btn btn-sm btn-outline-success" data-rental-unit="day">By Day</button>
+                                <button type="button" class="btn btn-sm btn-outline-success" data-rental-unit="hour">By Hour</button>
+                            </div>
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label" for="end_datetime">To (date and time)</label>
-                            <input type="datetime-local" class="form-control" id="end_datetime" required>
-                            <small class="form-text text-muted">A full 24 hours uses the listed daily rate. Shorter periods use the hourly rate.</small>
+                        <div class="row d-none" id="dayBookingFields">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label" for="day_start_date">From Date</label>
+                                <input type="date" class="form-control" id="day_start_date">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label" for="day_end_date">To Date (last rental day)</label>
+                                <input type="date" class="form-control" id="day_end_date">
+                            </div>
+                        </div>
+                        <div class="row d-none" id="hourBookingFields">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label" for="hour_start_datetime">From (date and time)</label>
+                                <input type="datetime-local" class="form-control" id="hour_start_datetime" step="3600">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label" for="hour_end_datetime">To (date and time)</label>
+                                <input type="datetime-local" class="form-control" id="hour_end_datetime" step="3600">
+                            </div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label" data-translate="delivery_address">Delivery Address</label>
@@ -492,63 +510,108 @@
             document.getElementById('equipment_id').value = equipmentId;
             document.getElementById('equipment_name').value = equipmentName;
 
-            const startInput = document.getElementById('start_datetime');
-            const endInput = document.getElementById('end_datetime');
-            const totalAmountInput = document.getElementById('total_amount');
+            activeHourlyRate = pricePerHour;
+            activeDailyRate = pricePerDay;
+            selectedRentalUnit = '';
+            document.getElementById('dayBookingFields').classList.add('d-none');
+            document.getElementById('hourBookingFields').classList.add('d-none');
+            document.getElementById('day_start_date').value = '';
+            document.getElementById('day_end_date').value = '';
+            document.getElementById('hour_start_datetime').value = '';
+            document.getElementById('hour_end_datetime').value = '';
+            const minDate = formatLocalDateTime(new Date()).slice(0, 10);
+            document.getElementById('day_start_date').min = minDate;
+            document.getElementById('day_end_date').min = minDate;
+            document.getElementById('hour_start_datetime').min = formatLocalDateTime(new Date());
+            document.getElementById('hour_end_datetime').min = formatLocalDateTime(new Date());
+            document.getElementById('total_amount').value = '';
+            document.querySelectorAll('[data-rental-unit]').forEach(button => button.classList.remove('active'));
 
-            function toLocalDateTimeValue(date) {
-                const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-                return localDate.toISOString().slice(0, 16);
-            }
-
-            startInput.min = toLocalDateTimeValue(new Date());
-            startInput.value = '';
-            endInput.value = '';
-            endInput.min = startInput.min;
-            totalAmountInput.value = '';
-
-            function updateCost() {
-                endInput.min = startInput.value || startInput.min;
-                if (!startInput.value || !endInput.value) {
-                    totalAmountInput.value = 'Select start and end times';
-                    return;
-                }
-                const durationMinutes = (new Date(endInput.value) - new Date(startInput.value)) / 60000;
-                if (durationMinutes <= 0) {
-                    totalAmountInput.value = 'End time must be after the start time';
-                    return;
-                }
-                const fullDays = Math.floor(durationMinutes / 1440);
-                const remainingHours = Math.ceil((durationMinutes % 1440) / 60);
-                const total = fullDays * pricePerDay + remainingHours * pricePerHour;
-                const durationSummary = [
-                    fullDays ? `${fullDays} day(s)` : '',
-                    remainingHours ? `${remainingHours} hour(s)` : ''
-                ].filter(Boolean).join(' + ');
-                totalAmountInput.value = `₹${total.toFixed(2)} (${durationSummary})`;
-            }
-
-            startInput.onchange = updateCost;
-            endInput.onchange = updateCost;
-            
             new bootstrap.Modal(document.getElementById('bookingModal')).show();
         }
+
+        let activeHourlyRate = 0;
+        let activeDailyRate = 0;
+        let selectedRentalUnit = '';
+
+        document.querySelectorAll('[data-rental-unit]').forEach(button => {
+            button.addEventListener('click', function() {
+                selectedRentalUnit = this.dataset.rentalUnit;
+                document.querySelectorAll('[data-rental-unit]').forEach(option => option.classList.toggle('active', option === this));
+                document.getElementById('dayBookingFields').classList.toggle('d-none', selectedRentalUnit !== 'day');
+                document.getElementById('hourBookingFields').classList.toggle('d-none', selectedRentalUnit !== 'hour');
+                document.getElementById('total_amount').value = '';
+                updateBookingCost();
+            });
+        });
+
+        function formatLocalDateTime(date) {
+            const pad = value => String(value).padStart(2, '0');
+            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        }
+
+        function getBookingDateTimes() {
+            if (selectedRentalUnit === 'day') {
+                const startDate = document.getElementById('day_start_date').value;
+                const endDate = document.getElementById('day_end_date').value;
+                if (!startDate || !endDate || endDate < startDate) return null;
+                const startParts = startDate.split('-').map(Number);
+                const endParts = endDate.split('-').map(Number);
+                const startDay = Date.UTC(startParts[0], startParts[1] - 1, startParts[2]);
+                const endDay = Date.UTC(endParts[0], endParts[1] - 1, endParts[2]);
+                const duration = Math.floor((endDay - startDay) / 86400000) + 1;
+                const start = new Date(`${startDate}T00:00`);
+                const exclusiveEndDate = new Date(endDay + 86400000).toISOString().slice(0, 10);
+                const end = new Date(`${exclusiveEndDate}T00:00`);
+                return {start: formatLocalDateTime(start), end: formatLocalDateTime(end), duration};
+            }
+            if (selectedRentalUnit === 'hour') {
+                const start = document.getElementById('hour_start_datetime').value;
+                const end = document.getElementById('hour_end_datetime').value;
+                if (!start || !end) return null;
+                const duration = (new Date(`${end}:00Z`) - new Date(`${start}:00Z`)) / 3600000;
+                if (duration < 1 || !Number.isInteger(duration)) return null;
+                return {start, end, duration};
+            }
+            return null;
+        }
+
+        function updateBookingCost() {
+            const booking = getBookingDateTimes();
+            if (!booking) {
+                document.getElementById('total_amount').value = 'Choose a rental period and valid dates/times';
+                return;
+            }
+            const rate = selectedRentalUnit === 'day' ? activeDailyRate : activeHourlyRate;
+            const unit = selectedRentalUnit === 'day' ? 'day(s)' : 'hour(s)';
+            document.getElementById('total_amount').value =
+                `₹${(rate * booking.duration).toFixed(2)} (${booking.duration} ${unit})`;
+        }
+
+        ['day_start_date', 'day_end_date', 'hour_start_datetime', 'hour_end_datetime'].forEach(id => {
+            document.getElementById(id).addEventListener('change', function() {
+                if (id === 'day_start_date') {
+                    document.getElementById('day_end_date').min = this.value;
+                } else if (id === 'hour_start_datetime') {
+                    document.getElementById('hour_end_datetime').min = this.value;
+                }
+                updateBookingCost();
+            });
+        });
         
         async function confirmBooking() {
+            const bookingPeriod = getBookingDateTimes();
             const bookingData = {
                 equipment_id: document.getElementById('equipment_id').value,
-                start_datetime: document.getElementById('start_datetime').value,
-                end_datetime: document.getElementById('end_datetime').value,
-                timezone_offset: new Date(document.getElementById('start_datetime').value).getTimezoneOffset(),
+                start_datetime: bookingPeriod && bookingPeriod.start,
+                end_datetime: bookingPeriod && bookingPeriod.end,
+                rental_unit: selectedRentalUnit,
+                timezone_offset: bookingPeriod ? new Date(bookingPeriod.start).getTimezoneOffset() : null,
                 delivery_address: document.getElementById('delivery_address').value
             };
             
-            if (!bookingData.start_datetime || !bookingData.end_datetime || !bookingData.delivery_address) {
-                alert('Please select the start and end date/time and enter a delivery address.');
-                return;
-            }
-            if (new Date(bookingData.end_datetime) <= new Date(bookingData.start_datetime)) {
-                alert('End date and time must be after the start date and time.');
+            if (!bookingPeriod || !bookingData.delivery_address) {
+                alert('Please choose a rental period, valid dates/times, and enter a delivery address.');
                 return;
             }
             

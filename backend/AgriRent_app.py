@@ -1540,7 +1540,16 @@ def book_equipment():
     duration_hours = (duration_minutes + 59) // 60
     full_days, remaining_minutes = divmod(duration_minutes, 24 * 60)
     remaining_hours = (remaining_minutes + 59) // 60
-    if full_days and remaining_hours:
+    requested_rental_unit = data.get('rental_unit')
+    if requested_rental_unit is not None:
+        if requested_rental_unit not in ('hour', 'day'):
+            return jsonify({'error': 'Choose hourly or daily rental'}), 400
+        if duration_minutes % 60:
+            return jsonify({'error': 'Rental duration must be in whole hours'}), 400
+        if requested_rental_unit == 'day' and duration_minutes % (24 * 60):
+            return jsonify({'error': 'Daily rentals must use whole days'}), 400
+        rental_unit = requested_rental_unit
+    elif full_days and remaining_hours:
         rental_unit = 'mixed'
     elif full_days:
         rental_unit = 'day'
@@ -1558,7 +1567,12 @@ def book_equipment():
         conn.close()
         return jsonify({'error': 'Equipment not found'}), 404
     
-    total_amount = equipment['price_per_day'] * full_days + equipment['price_per_hour'] * remaining_hours
+    if requested_rental_unit == 'day':
+        total_amount = equipment['price_per_day'] * (duration_minutes // (24 * 60))
+    elif requested_rental_unit == 'hour':
+        total_amount = equipment['price_per_hour'] * (duration_minutes // 60)
+    else:
+        total_amount = equipment['price_per_day'] * full_days + equipment['price_per_hour'] * remaining_hours
     booking_id = str(uuid.uuid4())[:8].upper()
     start_datetime_text = start_datetime.isoformat(timespec='minutes')
     end_datetime_text = end_datetime.isoformat(timespec='minutes')
